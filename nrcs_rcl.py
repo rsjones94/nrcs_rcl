@@ -23,12 +23,20 @@ else:
 
 from arcpy.sa import Con
 
+'''
 inlas = r'F:\gen_model\rcl_testing\las' # folder of las files
 out_folder = r'F:\gen_model\rcl_testing\rcl_model' # folder to create and write to
 pt_space = 0.6 # point spacing
 z_factor = 1 # elevation adjustment factor
 #coord_sys = r"Coordinate Systems\Projected Coordinate Systems\UTM\NAD 1983\NAD 1983 UTM Zone 16N.prj"
 coord_sys = None
+'''
+
+inlas = arcpy.GetParameterAsText(0) # folder of las files
+out_folder = arcpy.GetParameterAsText(1) # folder to create and write to
+pt_space = arcpy.GetParameter(2) # point spacing
+z_factor = arcpy.GetParameter(3) # elevation adjustment factor
+coord_sys = arcpy.GetParameter(4)
 
 
 ###

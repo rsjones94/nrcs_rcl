@@ -59,7 +59,7 @@ height_files = {'multipoint':None,
                 'raster':os.path.join(support_folder,'dhm.tif'),
                 'name':'height'}
 
-arcpy.SetProgressorLabel("Generating multipoint files")
+arcpy.AddMessage("Generating multipoint files")
 
 # we first need to create multipoint files representing the ground (last returns) and surface (first returns)
 arcpy.LASToMultipoint_3d(inlas, #input folder

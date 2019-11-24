@@ -38,8 +38,9 @@ pt_space = arcpy.GetParameter(2) # point spacing
 z_factor = arcpy.GetParameter(3) # elevation adjustment factor
 coord_sys = arcpy.GetParameter(4)
 
-
 ###
+
+progress = 0
 
 support_folder = os.path.join(out_folder,'support')
 os.mkdir(out_folder)
@@ -47,14 +48,18 @@ os.mkdir(support_folder)
 
 ground_files = {'multipoint':os.path.join(support_folder,'ground_multipoint.shp'),
                 'tin':os.path.join(support_folder,'ground_tin.adf'),
-                'raster':os.path.join(support_folder,'dem.tif')}
+                'raster':os.path.join(support_folder,'dem.tif'),
+                'name':'ground'}
 surface_files = {'multipoint':os.path.join(support_folder,'surf_multipoint.shp'),
                 'tin':os.path.join(support_folder,'surf_tin.adf'),
-                'raster':os.path.join(support_folder,'dsm.tif')}
+                'raster':os.path.join(support_folder,'dsm.tif'),
+                'name':'surface'}
 height_files = {'multipoint':None,
                 'tin':None,
-                'raster':os.path.join(support_folder,'dhm.tif')}
+                'raster':os.path.join(support_folder,'dhm.tif'),
+                'name':'height'}
 
+arcpy.SetProgressorLabel("Generating multipoint files")
 
 # we first need to create multipoint files representing the ground (last returns) and surface (first returns)
 arcpy.LASToMultipoint_3d(inlas, #input folder
@@ -80,6 +85,9 @@ arcpy.LASToMultipoint_3d(inlas, #input folder
                          z_factor, # z factor
                          False # folder recursion
                          )
+
+arcpy.AddMessage("Generating TINs and elevation rasters")
+progress += 1
 
 # then we need to create TINs and then make a raster from those
 for map in [ground_files, surface_files]:
@@ -109,6 +117,9 @@ dem_sl = os.path.join(support_folder,'demsl.tif')
 dsm_sl = os.path.join(support_folder,'dsmsl.tif')
 dhm_sl = os.path.join(support_folder,'dhmsl.tif')
 
+arcpy.AddMessage("Generating slope rasters")
+progress += 1
+
 for ras, ras_sl in zip([dem, dsm, dhm], [dem_sl, dsm_sl, dhm_sl]):
     memory_sl = arcpy.sa.Slope(in_raster=ras,
                                output_measurement='DEGREE',
@@ -123,6 +134,9 @@ for ras, ras_sl in zip([dem, dsm, dhm], [dem_sl, dsm_sl, dhm_sl]):
     ras_sl = arcpy.sa.Raster(ras_sl)
 
 # now that we have all out data we can run the decision tree
+
+arcpy.AddMessage("Classifying cover")
+progress += 1
 
 other_val = 3
 veg_val = 2
@@ -142,4 +156,7 @@ classified = Con(dsm_sl, where_clause="Value<=29.117",
 
 classified_path = os.path.join(out_folder, 'classified.tif')
 classified.save(classified_path)
+
+arcpy.AddMessage("Classification complete")
+arcpy.ResetProgressor()
 

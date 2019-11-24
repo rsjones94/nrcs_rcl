@@ -21,6 +21,7 @@ else:
     #
     raise Exception('No Spatial Analyst license available')
 
+from arcpy.sa import Con
 
 inlas = r'F:\gen_model\rcl_testing\las' # folder of las files
 out_folder = r'F:\gen_model\rcl_testing\rcl_model' # folder to create and write to
@@ -45,7 +46,6 @@ surface_files = {'multipoint':os.path.join(support_folder,'surf_multipoint.shp')
 height_files = {'multipoint':None,
                 'tin':None,
                 'raster':os.path.join(support_folder,'dhm.tif')}
-name_maps = [ground_files, surface_files]
 
 
 # we first need to create multipoint files representing the ground (last returns) and surface (first returns)
@@ -74,7 +74,7 @@ arcpy.LASToMultipoint_3d(inlas, #input folder
                          )
 
 # then we need to create TINs and then make a raster from those
-for map in name_maps:
+for map in [ground_files, surface_files]:
 
     in_feats = str(map['multipoint']) + ' Shape.Z masspoints'
     arcpy.CreateTin_3d(out_tin=map['tin'],
@@ -89,5 +89,49 @@ for map in name_maps:
                        )
 
 # make the height model
-dhm = arcpy.sa.Raster(surface_files['raster']) - arcpy.sa.Raster(ground_files['raster'])
-dhm.save(height_files['raster'])
+memory_dhm = arcpy.sa.Raster(surface_files['raster']) - arcpy.sa.Raster(ground_files['raster'])
+memory_dhm.save(height_files['raster'])
+
+
+dem = ground_files['raster']
+dsm = surface_files['raster']
+dhm = height_files['raster']
+
+dem_sl = os.path.join(support_folder,'demsl.tif')
+dsm_sl = os.path.join(support_folder,'dsmsl.tif')
+dhm_sl = os.path.join(support_folder,'dhmsl.tif')
+
+for ras, ras_sl in zip([dem, dsm, dhm], [dem_sl, dsm_sl, dhm_sl]):
+    memory_sl = arcpy.sa.Slope(in_raster=ras,
+                               output_measurement='DEGREE',
+                               z_factor=None, # already accounted for at this pint
+                               method='PLANAR',
+                               z_unit=None)
+    memory_sl.save(ras_sl)
+
+    # we're replacing the filepaths in the list we're iterating through with in-memory rasters as we go
+    # doing this to make the condition statement coming up somewhat easier to parse
+    ras = arcpy.sa.Raster(ras)
+    ras_sl = arcpy.sa.Raster(ras_sl)
+
+# now that we have all out data we can run the decision tree
+
+other_val = 3
+veg_val = 2
+tree_val = 1
+
+classified = Con(dsm_sl, where_clause="Value<=29.117",
+                 in_true_raster_or_constant=Con(dsm_sl, where_clause="Value<=2.887",
+                                                in_true_raster_or_constant=other_val,
+                                                in_false_raster_or_constant=Con(dem_sl, where_clause="Value<=32.663",
+                                                                                in_true_raster_or_constant=veg_val,
+                                                                                in_false_raster_or_constant=tree_val)),
+                 in_false_raster_or_constant=Con(dsm_sl, where_clause="Value<=55.36",
+                                                 in_true_raster_or_constant=Con(dem_sl, where_clause="Value<=45.682",
+                                                                                in_true_raster_or_constant=veg_val,
+                                                                                in_false_raster_or_constant=tree_val),
+                                                 in_false_raster_or_constant=tree_val))
+
+classified_path = os.path.join(out_folder, 'classified.tif')
+classified.save(classified_path)
+

@@ -30,6 +30,7 @@ inlas = arcpy.GetParameterAsText(0) # folder of las files
 out_folder = arcpy.GetParameterAsText(1) # folder to create and write to
 class_type = arcpy.GetParameterAsText(2) # binary or ternary
 z_factor = arcpy.GetParameter(3) # elevation adjustment factor
+clipping_file = arcpy.GetParameter(4)
 
 if class_type not in ['binary', 'ternary']:
     raise Exception('Invalid classification scheme')
@@ -46,15 +47,32 @@ os.mkdir(out_folder)
 os.mkdir(support_folder)
 
 arcpy.AddMessage("Generating footprint and .lasd")
-# make footprint
-footprint_name = os.path.join(support_folder, 'las_footprint.shp')
-files = [f for f in listdir(inlas) if isfile(join(inlas, f))]
-spatial_ref = arcpy.Describe(os.path.join(inlas,files[0])).spatialReference
-arcpy.PointFileInformation_3d(inlas, footprint_name, 'LAS', '.las', spatial_ref)
 
 # make lasd
 inlasd = os.path.join(support_folder, 'support.lasd')
 arcpy.CreateLasDataset_management(inlas, inlasd)
+
+# in the event that a clipping file is specified, make a new folder to dump the extracted las and change the inlas
+# and inlasd variables to point to the extracted data
+if clipping_file:
+    extraction_folder = os.path.join(support_folder, 'extraction')
+    extraction_las_folder = os.path.join(extraction_folder, 'las')
+    os.mkdir(extraction_folder)
+    os.mkdir(extraction_las_folder)
+    arcpy.ExtractLas_3d(in_las_dataset=inlasd,
+                        target_folder=extraction_las_folder,
+                        extent=None,
+                        boundary=clipping_file)
+
+    inlas = extraction_las_folder
+    inlasd = os.path.join(extraction_folder, 'support_extracted.lasd')
+    arcpy.CreateLasDataset_management(inlas, inlasd)
+
+# make footprint. if a clipping file was specified, the footprint will be of the extracted las
+footprint_name = os.path.join(support_folder, 'las_footprint.shp')
+files = [f for f in listdir(inlas) if isfile(join(inlas, f))]
+spatial_ref = arcpy.Describe(os.path.join(inlas,files[0])).spatialReference
+arcpy.PointFileInformation_3d(inlas, footprint_name, 'LAS', '.las', spatial_ref)
 
 ground_files = {'multipoint':os.path.join(support_folder,'ground_multipoint.shp'),
                 'tin':os.path.join(support_folder,'ground_tin.adf'),
@@ -86,8 +104,6 @@ arcpy.LasDatasetToRaster_conversion(in_las_dataset=surfaceLyr,
                                     sampling_type='CELLSIZE',
                                     sampling_value=1,
                                     z_factor=z_factor)
-arcpy.Clip_management(surface_files['rawraster'], "#", surface_files['raster'],footprint_name, "0", "ClippingGeometry")
-arcpy.Delete_management(surface_files['rawraster'])
 
 arcpy.AddMessage("Generating DEM")
 groundLyr = arcpy.CreateUniqueName('Last Return Layer')
@@ -103,7 +119,18 @@ arcpy.LasDatasetToRaster_conversion(in_las_dataset=groundLyr,
                                     sampling_type='CELLSIZE',
                                     sampling_value=1,
                                     z_factor=z_factor)
-arcpy.Clip_management(ground_files['rawraster'], "#", ground_files['raster'],footprint_name, "0", "ClippingGeometry")
+
+if clipping_file:
+    merged_intersect = os.path.join(extraction_folder, 'footprint_intersection.shp')
+    arcpy.Intersect_analysis(in_features=[footprint_name, clipping_file],
+                             out_feature_class=merged_intersect)
+    cutter = merged_intersect
+else:
+    cutter = footprint_name
+
+arcpy.Clip_management(surface_files['rawraster'], "#", surface_files['raster'], cutter, "0", "ClippingGeometry")
+arcpy.Clip_management(ground_files['rawraster'], "#", ground_files['raster'], cutter, "0", "ClippingGeometry")
+arcpy.Delete_management(surface_files['rawraster'])
 arcpy.Delete_management(ground_files['rawraster'])
 
 #arcpy.management.Delete(surfaceLyr)
@@ -158,13 +185,13 @@ elif class_type == 'binary':
     other_val = 0
     tree_val = 1
     classified = Con(dsm_sl, where_clause="Value<=19.241",
-                     in_true_raster_or_constant=tree_val,
-                     in_false_raster_or_constant=other_val)
+                     in_true_raster_or_constant=other_val,
+                     in_false_raster_or_constant=Con(dhm, where_clause="Value<=0",
+                                                     in_true_raster_or_constant=other_val,
+                                                     in_false_raster_or_constant=tree_val))
 
 classified_path = os.path.join(out_folder, 'classified.tif')
 classified.save(classified_path)
 
 arcpy.AddMessage("Classification complete")
 arcpy.ResetProgressor()
-
-

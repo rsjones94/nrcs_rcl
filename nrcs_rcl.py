@@ -26,20 +26,18 @@ else:
 from arcpy.sa import Con
 
 
-'''
-inlas = r'F:\gen_model\rcl_testing\las' # folder of las files
-out_folder = r'F:\gen_model\rcl_testing\rcl_model' # folder to create and write to
-pt_space = 0.6 # point spacing
-z_factor = 1 # elevation adjustment factor
-#coord_sys = r"Coordinate Systems\Projected Coordinate Systems\UTM\NAD 1983\NAD 1983 UTM Zone 16N.prj"
-coord_sys = None
-'''
-
 inlas = arcpy.GetParameterAsText(0) # folder of las files
 out_folder = arcpy.GetParameterAsText(1) # folder to create and write to
-z_factor = arcpy.GetParameter(2) # elevation adjustment factor
+class_type = arcpy.GetParameterAsText(2) # binary or ternary
+z_factor = arcpy.GetParameter(3) # elevation adjustment factor
 
-###
+if class_type not in ['binary', 'ternary']:
+    raise Exception('Invalid classification scheme')
+
+
+######################
+
+
 
 progress = 0
 
@@ -145,21 +143,23 @@ for ras, ras_sl in zip([dem, dsm, dhm], [dem_sl, dsm_sl, dhm_sl]):
 arcpy.AddMessage("Classifying cover")
 progress += 1
 
-other_val = 3
-veg_val = 2
-tree_val = 1
+# Con(param, where_clause="Value<=XXX", in_true_raster_or_constant=YYY, in_false_raster_or_constant=ZZZ)
 
-classified = Con(dsm_sl, where_clause="Value<=29.117",
-                 in_true_raster_or_constant=Con(dsm_sl, where_clause="Value<=2.887",
-                                                in_true_raster_or_constant=other_val,
-                                                in_false_raster_or_constant=Con(dem_sl, where_clause="Value<=32.663",
-                                                                                in_true_raster_or_constant=veg_val,
-                                                                                in_false_raster_or_constant=tree_val)),
-                 in_false_raster_or_constant=Con(dsm_sl, where_clause="Value<=55.36",
-                                                 in_true_raster_or_constant=Con(dem_sl, where_clause="Value<=45.682",
-                                                                                in_true_raster_or_constant=veg_val,
-                                                                                in_false_raster_or_constant=tree_val),
-                                                 in_false_raster_or_constant=tree_val))
+if class_type == 'ternary':
+    other_val = 0
+    veg_val = 1
+    tree_val = 2
+    classified = Con(dhm, where_clause="Value<=3.524",
+                     in_true_raster_or_constant=Con(dsm_sl, where_clause="Value<=3.205",
+                                                    in_true_raster_or_constant=other_val,
+                                                    in_false_raster_or_constant=veg_val),
+                     in_false_raster_or_constant=tree_val)
+elif class_type == 'binary':
+    other_val = 0
+    tree_val = 1
+    classified = Con(dsm_sl, where_clause="Value<=19.241",
+                     in_true_raster_or_constant=tree_val,
+                     in_false_raster_or_constant=other_val)
 
 classified_path = os.path.join(out_folder, 'classified.tif')
 classified.save(classified_path)

@@ -31,10 +31,10 @@ out_folder = arcpy.GetParameterAsText(1) # folder to create and write to
 class_type = arcpy.GetParameterAsText(2) # binary or ternary
 z_factor = arcpy.GetParameter(3) # elevation adjustment factor
 clipping_file = arcpy.GetParameter(4)
+has_clipping = not clipping_file.isEmpty
 
 if class_type not in ['binary', 'ternary']:
     raise Exception('Invalid classification scheme')
-
 
 ######################
 
@@ -54,7 +54,7 @@ arcpy.CreateLasDataset_management(inlas, inlasd)
 
 # in the event that a clipping file is specified, make a new folder to dump the extracted las and change the inlas
 # and inlasd variables to point to the extracted data
-if clipping_file:
+if has_clipping:
     extraction_folder = os.path.join(support_folder, 'extraction')
     extraction_las_folder = os.path.join(extraction_folder, 'las')
     os.mkdir(extraction_folder)
@@ -120,7 +120,7 @@ arcpy.LasDatasetToRaster_conversion(in_las_dataset=groundLyr,
                                     sampling_value=1,
                                     z_factor=z_factor)
 
-if clipping_file:
+if has_clipping:
     merged_intersect = os.path.join(extraction_folder, 'footprint_intersection.shp')
     arcpy.Intersect_analysis(in_features=[footprint_name, clipping_file],
                              out_feature_class=merged_intersect)

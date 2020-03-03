@@ -25,24 +25,44 @@ else:
 
 from arcpy.sa import Con
 
+inlas = arcpy.GetParameterAsText(0)  # folder of las files
+out_folder = arcpy.GetParameterAsText(1)  # folder to create and write to
+class_type = arcpy.GetParameterAsText(2)  # binary or ternary
+z_factor = arcpy.GetParameter(3)  # elevation adjustment factor
 
-inlas = arcpy.GetParameterAsText(0) # folder of las files
-out_folder = arcpy.GetParameterAsText(1) # folder to create and write to
-class_type = arcpy.GetParameterAsText(2) # binary or ternary
-z_factor = arcpy.GetParameter(3) # elevation adjustment factor
-clipping_file = arcpy.GetParameter(4)
-has_clipping = not clipping_file.isEmpty
+network_file = arcpy.GetParameter(4)  # stream network
+has_clipping = not network_file.isEmpty
+
+outer_buffer_width = arcpy.GetParameter(5)  # riparian buffer width
+if outer_buffer_width:
+    has_outer = True
+else:
+    has_outer = False
+
+"""
+inner_buffer_width = arcpy.GetParameter(6)  # tolerance buffer width
+if inner_buffer_width:
+    has_inner = True
+else:
+    has_inner = False
+
+if has_clipping and not has_inner:
+    inner_buffer_width = 0
+"""
 
 if class_type not in ['binary', 'ternary']:
     raise Exception('Invalid classification scheme')
 
-######################
+if has_clipping and not has_outer:
+    raise Exception('Riparian buffer width required if stream network is specified')
 
+
+######################
 
 
 progress = 0
 
-support_folder = os.path.join(out_folder,'support')
+support_folder = os.path.join(out_folder, 'support')
 os.mkdir(out_folder)
 os.mkdir(support_folder)
 
@@ -55,6 +75,12 @@ arcpy.CreateLasDataset_management(inlas, inlasd)
 # in the event that a clipping file is specified, make a new folder to dump the extracted las and change the inlas
 # and inlasd variables to point to the extracted data
 if has_clipping:
+    clipping_file = os.path.join(support_folder, 'riparian_buffer.shp')
+    arcpy.Buffer_analysis(in_features=network_file,
+                          out_feature_class=clipping_file,
+                          buffer_distance_or_field=outer_buffer_width,
+                          dissolve_option='ALL')  # str(outer_buffer_width) + " Unknown"
+
     extraction_folder = os.path.join(support_folder, 'extraction')
     extraction_las_folder = os.path.join(extraction_folder, 'las')
     os.mkdir(extraction_folder)
@@ -71,24 +97,23 @@ if has_clipping:
 # make footprint. if a clipping file was specified, the footprint will be of the extracted las
 footprint_name = os.path.join(support_folder, 'las_footprint.shp')
 files = [f for f in listdir(inlas) if isfile(join(inlas, f))]
-spatial_ref = arcpy.Describe(os.path.join(inlas,files[0])).spatialReference
+spatial_ref = arcpy.Describe(os.path.join(inlas, files[0])).spatialReference
 arcpy.PointFileInformation_3d(inlas, footprint_name, 'LAS', '.las', spatial_ref)
 
-ground_files = {'multipoint':os.path.join(support_folder,'ground_multipoint.shp'),
-                'tin':os.path.join(support_folder,'ground_tin.adf'),
-                'raster':os.path.join(support_folder,'dem.tif'),
-                'rawraster':os.path.join(support_folder,'rawdem.tif'),
-                'name':'ground'}
-surface_files = {'multipoint':os.path.join(support_folder,'surf_multipoint.shp'),
-                'tin':os.path.join(support_folder,'surf_tin.adf'),
-                'raster':os.path.join(support_folder,'dsm.tif'),
-                'rawraster':os.path.join(support_folder,'rawdsm.tif'),
-                'name':'surface'}
-height_files = {'multipoint':None,
-                'tin':None,
-                'raster':os.path.join(support_folder,'dhm.tif'),
-                'name':'height'}
-
+ground_files = {'multipoint': os.path.join(support_folder, 'ground_multipoint.shp'),
+                'tin': os.path.join(support_folder, 'ground_tin.adf'),
+                'raster': os.path.join(support_folder, 'dem.tif'),
+                'rawraster': os.path.join(support_folder, 'rawdem.tif'),
+                'name': 'ground'}
+surface_files = {'multipoint': os.path.join(support_folder, 'surf_multipoint.shp'),
+                 'tin': os.path.join(support_folder, 'surf_tin.adf'),
+                 'raster': os.path.join(support_folder, 'dsm.tif'),
+                 'rawraster': os.path.join(support_folder, 'rawdsm.tif'),
+                 'name': 'surface'}
+height_files = {'multipoint': None,
+                'tin': None,
+                'raster': os.path.join(support_folder, 'dhm.tif'),
+                'name': 'height'}
 
 arcpy.AddMessage("Generating DSM")
 surfaceLyr = arcpy.CreateUniqueName('First Return Layer')
@@ -99,7 +124,8 @@ arcpy.MakeLasDatasetLayer_management(in_las_dataset=inlasd,
 arcpy.LasDatasetToRaster_conversion(in_las_dataset=surfaceLyr,
                                     out_raster=surface_files['rawraster'],
                                     value_field='ELEVATION',
-                                    interpolation_type="TRIANGULATION NATURAL_NEIGHBOR NO_THINNING CLOSEST_TO_MEAN 0", #'TRIANGULATION Linear {point_thinning_type} {point_selection_method} {resolution}',
+                                    interpolation_type="TRIANGULATION NATURAL_NEIGHBOR NO_THINNING CLOSEST_TO_MEAN 0",
+                                    # 'TRIANGULATION Linear {point_thinning_type} {point_selection_method} {resolution}',
                                     data_type='FLOAT',
                                     sampling_type='CELLSIZE',
                                     sampling_value=1,
@@ -114,7 +140,8 @@ arcpy.MakeLasDatasetLayer_management(in_las_dataset=inlasd,
 arcpy.LasDatasetToRaster_conversion(in_las_dataset=groundLyr,
                                     out_raster=ground_files['rawraster'],
                                     value_field='ELEVATION',
-                                    interpolation_type="TRIANGULATION NATURAL_NEIGHBOR NO_THINNING MAXIMUM 0", #'TRIANGULATION Linear {point_thinning_type} {point_selection_method} {resolution}',
+                                    interpolation_type="TRIANGULATION NATURAL_NEIGHBOR NO_THINNING MAXIMUM 0",
+                                    # 'TRIANGULATION Linear {point_thinning_type} {point_selection_method} {resolution}',
                                     data_type='FLOAT',
                                     sampling_type='CELLSIZE',
                                     sampling_value=1,
@@ -133,29 +160,27 @@ arcpy.Clip_management(ground_files['rawraster'], "#", ground_files['raster'], cu
 arcpy.Delete_management(surface_files['rawraster'])
 arcpy.Delete_management(ground_files['rawraster'])
 
-#arcpy.management.Delete(surfaceLyr)
-#arcpy.management.Delete(groundLyr)
+# arcpy.management.Delete(surfaceLyr)
+# arcpy.management.Delete(groundLyr)
 
 arcpy.AddMessage("Generating DHM")
 memory_dhm = arcpy.sa.Raster(surface_files['raster']) - arcpy.sa.Raster(ground_files['raster'])
 memory_dhm.save(height_files['raster'])
 
-
 dem = ground_files['raster']
 dsm = surface_files['raster']
 dhm = height_files['raster']
 
-dem_sl = os.path.join(support_folder,'demsl.tif')
-dsm_sl = os.path.join(support_folder,'dsmsl.tif')
-dhm_sl = os.path.join(support_folder,'dhmsl.tif')
-
+dem_sl = os.path.join(support_folder, 'demsl.tif')
+dsm_sl = os.path.join(support_folder, 'dsmsl.tif')
+dhm_sl = os.path.join(support_folder, 'dhmsl.tif')
 
 arcpy.AddMessage("Generating slope rasters")
 progress += 1
 for ras, ras_sl in zip([dem, dsm, dhm], [dem_sl, dsm_sl, dhm_sl]):
     memory_sl = arcpy.sa.Slope(in_raster=ras,
                                output_measurement='DEGREE',
-                               z_factor=None, # already accounted for at this pint
+                               z_factor=None,  # already accounted for at this pint
                                method='PLANAR',
                                z_unit=None)
     memory_sl.save(ras_sl)
@@ -190,8 +215,27 @@ elif class_type == 'binary':
                                                      in_true_raster_or_constant=other_val,
                                                      in_false_raster_or_constant=tree_val))
 
-classified_path = os.path.join(out_folder, 'classified.tif')
-classified.save(classified_path)
+arcpy.AddMessage("Cleaning classifications")
+
+classified_path_raw = os.path.join(support_folder, 'classified_raw.tif')
+classified.save(classified_path_raw)
+
+classified_path_maj = os.path.join(support_folder, 'classified_maj.tif')
+maj = arcpy.sa.MajorityFilter(classified_path_raw, "EIGHT", "HALF")
+maj.save(classified_path_maj)
+
+classified_path_clean = os.path.join(support_folder, 'classified_clean.tif')
+cle = arcpy.sa.BoundaryClean(classified_path_maj, "DESCEND", "TWO_WAY")
+cle.save(classified_path_clean)
+
+arcpy.AddMessage("Converting to polygons")
+
+classified_path_poly = os.path.join(out_folder, 'classified_poly.shp')
+arcpy.RasterToPolygon_conversion(classified_path_clean, classified_path_poly, "SIMPLIFY")
+
+if has_clipping:
+    arcpy.AddMessage("Calculating distances")
+    arcpy.Near_analysis(classified_path_poly, network_file, outer_buffer_width)
 
 arcpy.AddMessage("Classification complete")
 arcpy.ResetProgressor()

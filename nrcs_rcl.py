@@ -237,5 +237,9 @@ if has_clipping:
     arcpy.AddMessage("Calculating distances")
     arcpy.Near_analysis(classified_path_poly, network_file, outer_buffer_width)
 
+arcpy.Delete_management(classified_path_clean)
+arcpy.Delete_management(classified_path_raw)
+arcpy.Delete_management(classified_path_maj)
+
 arcpy.AddMessage("Classification complete")
 arcpy.ResetProgressor()

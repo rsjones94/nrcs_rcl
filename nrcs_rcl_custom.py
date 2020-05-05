@@ -82,12 +82,12 @@ arcpy.PointFileInformation_3d(inlas, footprint_name, 'LAS', '.las', spatial_ref)
 ground_files = {'multipoint': os.path.join(support_folder, 'ground_multipoint.shp'),
                 'tin': os.path.join(support_folder, 'ground_tin.adf'),
                 'raster': os.path.join(support_folder, 'dem.tif'),
-                'rawraster': os.path.join(support_folder, 'rawdem.tif'),
+                'rawraster': os.path.join(support_folder, 'dem.tif'),
                 'name': 'ground'}
 surface_files = {'multipoint': os.path.join(support_folder, 'surf_multipoint.shp'),
                  'tin': os.path.join(support_folder, 'surf_tin.adf'),
                  'raster': os.path.join(support_folder, 'dsm.tif'),
-                 'rawraster': os.path.join(support_folder, 'rawdsm.tif'),
+                 'rawraster': os.path.join(support_folder, 'dsm.tif'),
                  'name': 'surface'}
 height_files = {'multipoint': None,
                 'tin': None,
@@ -96,7 +96,7 @@ height_files = {'multipoint': None,
 intensity_files = {'multipoint': None,
                    'tin': None,
                    'raster': os.path.join(support_folder, 'intensity.tif'),
-                   'rawraster': os.path.join(support_folder, 'rawintensity.tif'),
+                   'rawraster': os.path.join(support_folder, 'intensity.tif'),
                    'name': 'intensity'}
 
 arcpy.AddMessage("Generating DSM")
@@ -238,8 +238,9 @@ arcpy.AddMessage("Converting to polygons")
 
 classified_path_poly = os.path.join(out_folder, 'classified_poly.shp')
 
+classified_path_clean_clipped = os.path.join(support_folder, 'classified_clean_clipped.tif')
+cutter = footprint_name
 if has_clipping:
-    classified_path_clean_clipped = os.path.join(support_folder, 'classified_clean_clipped.tif')
 
     clipping_file = os.path.join(support_folder, 'riparian_buffer.shp')
     arcpy.Buffer_analysis(in_features=network_file,
@@ -261,8 +262,15 @@ if has_clipping:
 
     arcpy.AddMessage("Calculating distances")
     arcpy.Near_analysis(classified_path_poly, network_file, outer_buffer_width)
+
 else:
-    arcpy.RasterToPolygon_conversion(classified_path_clean, classified_path_poly, "SIMPLIFY")
+    arcpy.Clip_management(classified_path_clean, "#", classified_path_clean_clipped, cutter, "-100", "ClippingGeometry")
+    arcpy.RasterToPolygon_conversion(classified_path_clean_clipped, classified_path_poly, "SIMPLIFY")
+
+arcpy.Delete_management(classified_path_clean_clipped)
+arcpy.Delete_management(classified_path_clean)
+arcpy.Delete_management(classified_path_raw)
+arcpy.Delete_management(classified_path_maj)
 
 arcpy.AddMessage("Classification complete")
 arcpy.ResetProgressor()

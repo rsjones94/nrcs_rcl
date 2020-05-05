@@ -29,7 +29,7 @@ inlas = arcpy.GetParameterAsText(0)  # folder of las files
 
 out_folder = arcpy.GetParameterAsText(1)  # folder to create and write to
 
-training_file = arcpy.GetParameter(2)  # shapefile of training shapes
+training_file = arcpy.GetParameter(2)  # shapefile of training shapes. must have an Int field called 'Values'
 
 z_factor = arcpy.GetParameter(3)  # elevation adjustment factor
 
@@ -72,27 +72,6 @@ arcpy.AddMessage("Generating footprint and .lasd")
 inlasd = os.path.join(support_folder, 'support.lasd')
 arcpy.CreateLasDataset_management(inlas, inlasd)
 
-# in the event that a clipping file is specified, make a new folder to dump the extracted las and change the inlas
-# and inlasd variables to point to the extracted data
-if has_clipping:
-    clipping_file = os.path.join(support_folder, 'riparian_buffer.shp')
-    arcpy.Buffer_analysis(in_features=network_file,
-                          out_feature_class=clipping_file,
-                          buffer_distance_or_field=outer_buffer_width,
-                          dissolve_option='ALL')  # str(outer_buffer_width) + " Unknown"
-
-    extraction_folder = os.path.join(support_folder, 'extraction')
-    extraction_las_folder = os.path.join(extraction_folder, 'las')
-    os.mkdir(extraction_folder)
-    os.mkdir(extraction_las_folder)
-    arcpy.ExtractLas_3d(in_las_dataset=inlasd,
-                        target_folder=extraction_las_folder,
-                        extent=None,
-                        boundary=clipping_file)
-
-    inlas = extraction_las_folder
-    inlasd = os.path.join(extraction_folder, 'support_extracted.lasd')
-    arcpy.CreateLasDataset_management(inlas, inlasd)
 
 # make footprint. if a clipping file was specified, the footprint will be of the extracted las
 footprint_name = os.path.join(support_folder, 'las_footprint.shp')
@@ -152,7 +131,7 @@ arcpy.LasDatasetToRaster_conversion(in_las_dataset=groundLyr,
                                     sampling_value=1,
                                     z_factor=z_factor)
 
-arcpy.AddMessage("Generating Intensity Raster")
+arcpy.AddMessage("Generating intensity raster")
 allLyr = arcpy.CreateUniqueName('All Return Layer')
 arcpy.MakeLasDatasetLayer_management(in_las_dataset=inlasd,
                                      out_layer=allLyr,
@@ -168,33 +147,19 @@ arcpy.LasDatasetToRaster_conversion(in_las_dataset=allLyr,
                                     sampling_value=1,
                                     z_factor=z_factor)
 
-"""
-if has_clipping:
-    merged_intersect = os.path.join(extraction_folder, 'footprint_intersection.shp')
-    arcpy.Intersect_analysis(in_features=[footprint_name, clipping_file],
-                             out_feature_class=merged_intersect)
-    cutter = merged_intersect
-else:
-    cutter = footprint_name
 
-
-arcpy.Clip_management(surface_files['rawraster'], "#", surface_files['raster'], cutter, "0", "ClippingGeometry")
-arcpy.Clip_management(ground_files['rawraster'], "#", ground_files['raster'], cutter, "0", "ClippingGeometry")
-arcpy.Delete_management(surface_files['rawraster'])
-arcpy.Delete_management(ground_files['rawraster'])
-"""
 
 # arcpy.management.Delete(surfaceLyr)
 # arcpy.management.Delete(groundLyr)
 
 arcpy.AddMessage("Generating DHM")
 memory_dhm = arcpy.sa.Raster(surface_files['rawraster']) - arcpy.sa.Raster(ground_files['rawraster'])
-memory_dhm.save(height_files['rawraster'])
+memory_dhm.save(height_files['raster'])
 
 
 dem = ground_files['rawraster']
 dsm = surface_files['rawraster']
-dhm = height_files['rawraster']
+dhm = height_files['raster']
 inten = intensity_files['rawraster']
 
 dem_sl = os.path.join(support_folder, 'demsl.tif')
@@ -218,12 +183,45 @@ for ras, ras_sl in zip([dem, dsm, dhm], [dem_sl, dsm_sl, dhm_sl]):
 
 # now that we have all out data we can run the decision tree
 
-arcpy.AddMessage("Classifying cover")
+arcpy.AddMessage("Normalizing data")
 progress += 1
 
-pass
+training_data = {'dhm': dhm,
+                 'dhm_sl': dhm_sl,
+                 'dsm_sl': dsm_sl,
+                 'dem_sl': dem_sl,
+                 'inten': inten
+                 }
+
+training_folder = os.path.join(support_folder, 'training')
+os.mkdir(training_folder)
+normalized_training_data = {}
+for key, filepath in training_data.items():
+    ras = arcpy.Raster(filepath)
+    norm_raster = (ras - ras.minimum) / (ras.maximum - ras.minimum) * 100
+    norm_name = r'norm'+key
+    norm_path = os.path.join(training_folder, norm_name+r'.tif')
+    norm_raster.save(norm_path)
+    normalized_training_data[norm_name] = norm_path
+
+# stick it in a multiband raster for training
+composite_input = ';'.join(normalized_training_data.values())
+composite_output = os.path.join(training_folder, 'trainingset.tif')
+arcpy.CompositeBands_management(composite_input, composite_output)
+
+arcpy.AddMessage("Training model")
+progress += 1
+
+svm = os.path.join(training_folder, 'svm.ecd')
+arcpy.gp.TrainSupportVectorMachineClassifier(composite_output, training_file, svm)
+
+arcpy.AddMessage("Classifying")
+progress += 1
+
+classified = arcpy.sa.ClassifyRaster(composite_output, svm)
 
 arcpy.AddMessage("Cleaning classifications")
+progress += 1
 
 classified_path_raw = os.path.join(support_folder, 'classified_raw.tif')
 classified.save(classified_path_raw)
@@ -239,11 +237,32 @@ cle.save(classified_path_clean)
 arcpy.AddMessage("Converting to polygons")
 
 classified_path_poly = os.path.join(out_folder, 'classified_poly.shp')
-arcpy.RasterToPolygon_conversion(classified_path_clean, classified_path_poly, "SIMPLIFY")
 
 if has_clipping:
+    classified_path_clean_clipped = os.path.join(support_folder, 'classified_clean_clipped.tif')
+
+    clipping_file = os.path.join(support_folder, 'riparian_buffer.shp')
+    arcpy.Buffer_analysis(in_features=network_file,
+                          out_feature_class=clipping_file,
+                          buffer_distance_or_field=outer_buffer_width,
+                          dissolve_option='ALL')  # str(outer_buffer_width) + " Unknown"
+
+    extraction_folder = os.path.join(support_folder, 'extraction')
+    os.mkdir(extraction_folder)
+
+    merged_intersect = os.path.join(extraction_folder, 'footprint_intersection.shp')
+    arcpy.Intersect_analysis(in_features=[footprint_name, clipping_file],
+                             out_feature_class=merged_intersect)
+    cutter = merged_intersect
+
+    arcpy.Clip_management(classified_path_clean, "#", classified_path_clean_clipped, cutter, "-100", "ClippingGeometry")
+
+    arcpy.RasterToPolygon_conversion(classified_path_clean_clipped, classified_path_poly, "SIMPLIFY")
+
     arcpy.AddMessage("Calculating distances")
     arcpy.Near_analysis(classified_path_poly, network_file, outer_buffer_width)
+else:
+    arcpy.RasterToPolygon_conversion(classified_path_clean, classified_path_poly, "SIMPLIFY")
 
 arcpy.AddMessage("Classification complete")
 arcpy.ResetProgressor()

@@ -56,7 +56,6 @@ if class_type not in ['binary', 'ternary']:
 if has_clipping and not has_outer:
     raise Exception('Riparian buffer width required if stream network is specified')
 
-
 ######################
 
 
@@ -98,6 +97,12 @@ if has_clipping:
 footprint_name = os.path.join(support_folder, 'las_footprint.shp')
 files = [f for f in listdir(inlas) if isfile(join(inlas, f))]
 spatial_ref = arcpy.Describe(os.path.join(inlas, files[0])).spatialReference
+
+if spatial_ref.type != 'Projected':
+    raise Exception('LAS data must be in a projected coordinate system')
+
+cell_edge_length = 1/spatial_ref.metersPerUnit
+
 arcpy.PointFileInformation_3d(inlas, footprint_name, 'LAS', '.las', spatial_ref)
 
 ground_files = {'multipoint': os.path.join(support_folder, 'ground_multipoint.shp'),
@@ -128,7 +133,7 @@ arcpy.LasDatasetToRaster_conversion(in_las_dataset=surfaceLyr,
                                     # 'TRIANGULATION Linear {point_thinning_type} {point_selection_method} {resolution}',
                                     data_type='FLOAT',
                                     sampling_type='CELLSIZE',
-                                    sampling_value=1,
+                                    sampling_value=cell_edge_length,
                                     z_factor=z_factor)
 
 arcpy.AddMessage("Generating DEM")
@@ -144,7 +149,7 @@ arcpy.LasDatasetToRaster_conversion(in_las_dataset=groundLyr,
                                     # 'TRIANGULATION Linear {point_thinning_type} {point_selection_method} {resolution}',
                                     data_type='FLOAT',
                                     sampling_type='CELLSIZE',
-                                    sampling_value=1,
+                                    sampling_value=cell_edge_length,
                                     z_factor=z_factor)
 
 if has_clipping:

@@ -74,6 +74,7 @@ arcpy.CreateLasDataset_management(inlas, inlasd)
 # in the event that a clipping file is specified, make a new folder to dump the extracted las and change the inlas
 # and inlasd variables to point to the extracted data
 if has_clipping:
+    
     clipping_file = os.path.join(support_folder, 'riparian_buffer.shp')
     arcpy.Buffer_analysis(in_features=network_file,
                           out_feature_class=clipping_file,
@@ -98,12 +99,19 @@ footprint_name = os.path.join(support_folder, 'las_footprint.shp')
 files = [f for f in listdir(inlas) if isfile(join(inlas, f))]
 spatial_ref = arcpy.Describe(os.path.join(inlas, files[0])).spatialReference
 
+if files[0][-4:] == '.las':
+    file_type = '.las'
+elif files[0][-5:] == '.zlas':
+    file_type = '.zlas'
+else:
+    raise Exception('Input files must be las or zlas')
+
 if spatial_ref.type != 'Projected':
     raise Exception('LAS data must be in a projected coordinate system')
 
 cell_edge_length = 1/spatial_ref.metersPerUnit
 
-arcpy.PointFileInformation_3d(inlas, footprint_name, 'LAS', '.las', spatial_ref)
+arcpy.PointFileInformation_3d(inlas, footprint_name, 'LAS', file_type, spatial_ref)
 
 ground_files = {'multipoint': os.path.join(support_folder, 'ground_multipoint.shp'),
                 'tin': os.path.join(support_folder, 'ground_tin.adf'),
@@ -145,7 +153,7 @@ arcpy.MakeLasDatasetLayer_management(in_las_dataset=inlasd,
 arcpy.LasDatasetToRaster_conversion(in_las_dataset=groundLyr,
                                     out_raster=ground_files['rawraster'],
                                     value_field='ELEVATION',
-                                    interpolation_type="TRIANGULATION NATURAL_NEIGHBOR CLOSEST_TO_MEAN MAXIMUM 0",
+                                    interpolation_type="TRIANGULATION NATURAL_NEIGHBOR NO_THINNING CLOSEST_TO_MEAN 0",
                                     # 'TRIANGULATION Linear {point_thinning_type} {point_selection_method} {resolution}',
                                     # previous selection method was MAXIMUM
                                     data_type='FLOAT',
